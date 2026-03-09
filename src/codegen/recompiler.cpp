@@ -531,7 +531,7 @@ bool Recompiler::recompile(const FunctionNode& fn) {
       } else {
         // Check for potential jump table that wasn't detected during analysis
         if (insn.opcode->id == PPC_INST_BCTR && switchTable == config().switchTables.end() &&
-            ctx_ != nullptr) {
+            ctx_ != nullptr && !analysisState().knownIndirectCalls.contains(base)) {
           // Look for mtctr within 3 instructions before bctr
           // mtctr rX = 0x7CXX03A6 (where XX = RS << 5)
           // nop = 0x60000000

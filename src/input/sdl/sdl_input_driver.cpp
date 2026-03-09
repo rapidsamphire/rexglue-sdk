@@ -194,15 +194,20 @@ X_RESULT SDLInputDriver::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibrat
 
   QueueControllerUpdate();
 
-  std::unique_lock<std::mutex> guard(controllers_mutex_);
-
-  auto controller = GetControllerState(user_index);
-  if (!controller) {
-    return X_ERROR_DEVICE_NOT_CONNECTED;
+  SDL_GameController* sdl_controller = nullptr;
+  {
+    std::unique_lock<std::mutex> guard(controllers_mutex_);
+    auto controller = GetControllerState(user_index);
+    if (!controller) {
+      return X_ERROR_DEVICE_NOT_CONNECTED;
+    }
+    sdl_controller = controller->sdl;
   }
 
 #if SDL_VERSION_ATLEAST(2, 0, 9)
-  if (SDL_GameControllerRumble(controller->sdl, vibration->left_motor_speed,
+  // Release controllers_mutex_ before calling SDL_GameControllerRumble to
+  // avoid lock-ordering deadlock with SDL's internal joystick lock.
+  if (SDL_GameControllerRumble(sdl_controller, vibration->left_motor_speed,
                                vibration->right_motor_speed, 0)) {
     return X_ERROR_FUNCTION_FAILED;
   } else {

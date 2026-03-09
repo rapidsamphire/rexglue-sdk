@@ -56,6 +56,7 @@ REXCVAR_DECLARE(int32_t, primitive_processor_cache_min_indices);
 REXCVAR_DECLARE(std::string, dump_shaders);
 REXCVAR_DECLARE(bool, dxbc_switch);
 REXCVAR_DECLARE(bool, dxbc_source_map);
+REXCVAR_DECLARE(bool, vfetch_index_rounding_bias);
 
 // GPU Tracing
 REXCVAR_DECLARE(std::string, trace_gpu_prefix);

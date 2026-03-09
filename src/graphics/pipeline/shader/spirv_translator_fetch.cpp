@@ -19,8 +19,11 @@
 #include <fmt/format.h>
 
 #include <rex/assert.h>
+#include <rex/cvar.h>
 #include <rex/graphics/pipeline/shader/spirv_translator.h>
 #include <rex/math.h>
+
+REXCVAR_DECLARE(bool, vfetch_index_rounding_bias);
 
 namespace rex::graphics {
 
@@ -80,6 +83,9 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
       if (instr.attributes.is_index_rounded) {
         index = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_, index,
                                                    builder_->makeFloatConstant(0.5f));
+      } else if (REXCVAR_GET(vfetch_index_rounding_bias)) {
+        index = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_, index,
+                                                   builder_->makeFloatConstant(0.00025f));
       }
       index =
           builder_->createUnaryOp(spv::OpConvertFToS, type_int_,
