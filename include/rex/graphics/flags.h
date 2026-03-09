@@ -78,6 +78,9 @@ REXCVAR_DECLARE(bool, use_fuzzy_alpha_epsilon);
 REXCVAR_DECLARE(std::string, dump_shaders);
 REXCVAR_DECLARE(bool, dxbc_switch);
 REXCVAR_DECLARE(bool, dxbc_source_map);
+REXCVAR_DECLARE(bool, vfetch_index_rounding_bias);
+
+// GPU Tracing
 REXCVAR_DECLARE(std::string, trace_gpu_prefix);
 REXCVAR_DECLARE(bool, trace_gpu_stream);
 REXCVAR_DECLARE(std::string, swap_post_effect);
