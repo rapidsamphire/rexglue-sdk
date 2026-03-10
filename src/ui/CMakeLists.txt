@@ -101,10 +101,10 @@ target_link_libraries(rexui PUBLIC
     imgui::imgui
 )
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/thirdparty/FidelityFX/sdk/include")
+if(EXISTS "${ReXGlue_SOURCE_DIR}/thirdparty/FidelityFX/sdk/include")
     target_include_directories(rexui PRIVATE
-        "${CMAKE_SOURCE_DIR}/thirdparty/FidelityFX/sdk/include"
-        "${CMAKE_SOURCE_DIR}/thirdparty/FidelityFX/ffx-api/include"
+        "${ReXGlue_SOURCE_DIR}/thirdparty/FidelityFX/sdk/include"
+        "${ReXGlue_SOURCE_DIR}/thirdparty/FidelityFX/ffx-api/include"
     )
     target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_SDK=1)
 endif()

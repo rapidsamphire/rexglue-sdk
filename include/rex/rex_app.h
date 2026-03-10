@@ -102,6 +102,7 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   Runtime* runtime() const { return runtime_.get(); }
   ui::Window* window() const { return window_.get(); }
   ui::ImGuiDrawer* imgui_drawer() const { return imgui_drawer_.get(); }
+  ui::DebugOverlayDialog* debug_overlay() const { return debug_overlay_.get(); }
 
   const std::filesystem::path& game_data_root() const { return game_data_root_; }
   const std::filesystem::path& user_data_root() const { return user_data_root_; }
