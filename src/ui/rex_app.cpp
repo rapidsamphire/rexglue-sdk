@@ -191,6 +191,15 @@ bool ReXApp::OnInitialize() {
   }
   window_->Open();
 
+  // Set window icon from the game's SPA title icon (PNG stored in XEX XDBF section)
+  {
+    auto xdbf = runtime_->kernel_state()->title_xdbf();
+    auto icon = xdbf.icon();
+    if (icon) {
+      window_->SetIcon(icon.buffer, icon.size);
+    }
+  }
+
   // Setup graphics presenter and ImGui
   auto* graphics_system = static_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system());
   if (graphics_system && graphics_system->presenter()) {
