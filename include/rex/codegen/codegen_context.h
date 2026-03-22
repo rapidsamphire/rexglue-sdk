@@ -155,6 +155,12 @@ class CodegenContext {
 
   const std::filesystem::path& configDir() const { return configDir_; }
 
+  /// Game icon extracted from XDBF (Windows .ico format). Empty if not found.
+  const std::vector<uint8_t>& gameIcon() const { return gameIcon_; }
+
+  /// Game title extracted from XDBF. Empty if not found.
+  const std::string& gameTitle() const { return gameTitle_; }
+
  private:
   CodegenContext() = default;
 
@@ -164,6 +170,8 @@ class CodegenContext {
   std::unique_ptr<DecodedBinary> decoded_;  ///< Decoded instructions (created via initDecoded())
   runtime::ExportResolver* resolver_ = nullptr;  ///< For runtime resolution (borrowed)
   std::filesystem::path configDir_;  ///< Directory containing config file (for relative paths)
+  std::vector<uint8_t> gameIcon_;    ///< Game icon from XDBF (.ico format)
+  std::string gameTitle_;            ///< Game title from XDBF
 };
 
 }  // namespace rex::codegen

@@ -19,6 +19,7 @@
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
+#include <rex/system/util/xdbf_utils.h>
 #include <rex/system/xex_module.h>
 
 namespace rex::codegen {
@@ -86,6 +87,21 @@ Result<CodegenContext> CodegenContext::Create(const std::filesystem::path& confi
 
   ctx.binary_ = BinaryView::fromModule(*module);
   ctx.resolver_ = runtime.export_resolver();
+
+  // Extract game icon and title from XDBF
+  auto xdbf = runtime.kernel_state()->module_xdbf(user_module);
+  if (xdbf.is_valid()) {
+    auto iconBlock = xdbf.icon();
+    if (iconBlock) {
+      ctx.gameIcon_.assign(iconBlock.buffer, iconBlock.buffer + iconBlock.size);
+      REXCODEGEN_INFO("Extracted game icon from XDBF ({} bytes)", ctx.gameIcon_.size());
+    }
+    auto title = xdbf.title();
+    if (!title.empty()) {
+      ctx.gameTitle_ = std::move(title);
+      REXCODEGEN_INFO("Game title: {}", ctx.gameTitle_);
+    }
+  }
 
   REXCODEGEN_INFO("Loaded XEX: base=0x{:08X}, size=0x{:X}, entry=0x{:08X}",
                   ctx.binary_.baseAddress(), ctx.binary_.imageSize(), ctx.binary_.entryPoint());

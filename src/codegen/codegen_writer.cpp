@@ -100,6 +100,9 @@ nlohmann::json buildTemplateData(const rex::codegen::CodegenContext& ctx,
       {"non_volatile_as_local", cfg.nonVolatileRegistersAsLocalVariables},
   };
 
+  bool hasIcon = !ctx.gameIcon().empty();
+  std::string iconFilename = hasIcon ? fmt::format("{}_icon.ico", cfg.projectName) : "";
+
   return {
       {"project", cfg.projectName},
       {"image_base", fmt::format("0x{:X}", ctx.binary().baseAddress())},
@@ -111,6 +114,9 @@ nlohmann::json buildTemplateData(const rex::codegen::CodegenContext& ctx,
       {"functions", functionsJson},
       {"imports", importsJson},
       {"recomp_files", nlohmann::json::array()},
+      {"has_icon", hasIcon},
+      {"icon_filename", iconFilename},
+      {"game_title", ctx.gameTitle()},
   };
 }
 
@@ -163,13 +169,26 @@ bool CodegenWriter::write(bool force) {
   std::string prefix = config().projectName + "_";
   for (const auto& entry : std::filesystem::directory_iterator(outputPath)) {
     auto ext = entry.path().extension();
-    if (ext == ".cpp" || ext == ".h" || ext == ".cmake") {
+    if (ext == ".cpp" || ext == ".h" || ext == ".cmake" || ext == ".rc") {
       std::string filename = entry.path().filename().string();
       if (filename == "sources.cmake" || filename.starts_with(prefix) ||
           filename.starts_with("ppc_recomp") || filename.starts_with("ppc_func_mapping") ||
           filename.starts_with("function_table_init") || filename.starts_with("ppc_config")) {
         std::filesystem::remove(entry.path());
       }
+    }
+  }
+
+  // --- Write game icon extracted from XDBF ---
+  if (!ctx_.gameIcon().empty()) {
+    auto iconPath = outputPath / fmt::format("{}_icon.ico", config().projectName);
+    FILE* iconFile = fopen(iconPath.string().c_str(), "wb");
+    if (iconFile) {
+      fwrite(ctx_.gameIcon().data(), 1, ctx_.gameIcon().size(), iconFile);
+      fclose(iconFile);
+      REXCODEGEN_INFO("Wrote game icon: {} ({} bytes)", iconPath.string(), ctx_.gameIcon().size());
+    } else {
+      REXCODEGEN_WARN("Failed to write game icon: {}", iconPath.string());
     }
   }
 
