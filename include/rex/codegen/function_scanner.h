@@ -256,6 +256,7 @@ struct BlockDiscoveryResult {
 BlockDiscoveryResult discoverBlocks(DecodedBinary& decoded, uint32_t entryPoint,
                                     const CodeRegion& containingRegion,
                                     const std::unordered_set<uint32_t>& knownFunctions,
+                                    const std::unordered_set<uint32_t>& knownIndirectCalls,
                                     uint32_t pdataSize = 0);
 
 //=============================================================================
@@ -278,6 +279,7 @@ BlockDiscoveryResult discoverBlocks(DecodedBinary& decoded, uint32_t entryPoint,
  */
 std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAddr,
                                          const CodeRegion& containingRegion, uint32_t funcStart,
-                                         uint32_t funcEnd);
+                                         uint32_t funcEnd,
+                                         const std::unordered_set<uint32_t>& knownIndirectCalls);
 
 }  // namespace rex::codegen

@@ -1362,9 +1362,14 @@ BoundsInfo scanForBounds(DecodedBinary& decoded, uint32_t bctrAddr, const CodeRe
 //=============================================================================
 std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAddr,
                                          const CodeRegion& containingRegion, uint32_t funcStart,
-                                         uint32_t funcEnd) {
+                                         uint32_t funcEnd,
+                                         const std::unordered_set<uint32_t>& knownIndirectCalls) {
   using namespace rex::codegen::ppc;
 
+  if (knownIndirectCalls.contains(bctrAddr)) {
+    REXCODEGEN_TRACE("detectJumpTable: bctr=0x{:08X} forced indirect-call hint", bctrAddr);
+    return std::nullopt;
+  }
   const int kMaxBackwardScan = static_cast<int>(REXCVAR_GET(backward_scan_limit));
   const uint32_t kMaxTableEntries = REXCVAR_GET(max_jump_table_entries);
 
@@ -1813,6 +1818,7 @@ std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAd
 BlockDiscoveryResult discoverBlocks(DecodedBinary& decoded, uint32_t entryPoint,
                                     const CodeRegion& containingRegion,
                                     const std::unordered_set<uint32_t>& knownFunctions,
+                                    const std::unordered_set<uint32_t>& knownIndirectCalls,
                                     uint32_t pdataSize) {
   BlockDiscoveryResult result;
   std::unordered_set<uint32_t> visited;
@@ -1902,7 +1908,8 @@ BlockDiscoveryResult discoverBlocks(DecodedBinary& decoded, uint32_t entryPoint,
           // bctr - try to detect jump table
           REXCODEGEN_TRACE("discoverBlocks: bctr at 0x{:08X} in func 0x{:08X}, funcEnd=0x{:08X}",
                            addr, entryPoint, funcEnd);
-          auto jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
+          auto jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd,
+                                    knownIndirectCalls);
           if (jt) {
             REXCODEGEN_TRACE("discoverBlocks: detected jump table at bctr 0x{:08X} with {} targets",
                              addr, jt->targets.size());
