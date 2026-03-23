@@ -13,9 +13,12 @@
 #include "codegen_flags.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <fmt/format.h>
 #include <inja/inja.hpp>
@@ -29,9 +32,117 @@
 #include "codegen_logging.h"
 #include "template_registry_internal.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include <stb_image.h>
+
 #include <xxhash.h>
 
 namespace {
+
+void writeU16(FILE* file, uint16_t value) {
+  const uint8_t bytes[2] = {
+      static_cast<uint8_t>(value & 0xFF),
+      static_cast<uint8_t>((value >> 8) & 0xFF),
+  };
+  fwrite(bytes, sizeof(bytes), 1, file);
+}
+
+void writeU32(FILE* file, uint32_t value) {
+  const uint8_t bytes[4] = {
+      static_cast<uint8_t>(value & 0xFF),
+      static_cast<uint8_t>((value >> 8) & 0xFF),
+      static_cast<uint8_t>((value >> 16) & 0xFF),
+      static_cast<uint8_t>((value >> 24) & 0xFF),
+  };
+  fwrite(bytes, sizeof(bytes), 1, file);
+}
+
+bool writeBmpIco(const std::filesystem::path& iconPath, const std::vector<uint8_t>& pngData) {
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  stbi_uc* rgbaPixels =
+      stbi_load_from_memory(pngData.data(), static_cast<int>(pngData.size()), &width, &height,
+                            &channels, 4);
+  if (!rgbaPixels) {
+    REXCODEGEN_WARN("Failed to decode PNG icon data: {}", stbi_failure_reason());
+    return false;
+  }
+
+  if (width <= 0 || height <= 0) {
+    stbi_image_free(rgbaPixels);
+    REXCODEGEN_WARN("Decoded icon has invalid dimensions: {}x{}", width, height);
+    return false;
+  }
+
+  const uint32_t xorStride = static_cast<uint32_t>(width) * 4;
+  const uint32_t xorSize = xorStride * static_cast<uint32_t>(height);
+  const uint32_t andStride = ((static_cast<uint32_t>(width) + 31u) / 32u) * 4u;
+  const uint32_t andSize = andStride * static_cast<uint32_t>(height);
+  const uint32_t dibSize = 40u + xorSize + andSize;
+  const uint8_t iconWidth = width >= 256 ? 0 : static_cast<uint8_t>(width);
+  const uint8_t iconHeight = height >= 256 ? 0 : static_cast<uint8_t>(height);
+
+  FILE* iconFile = fopen(iconPath.string().c_str(), "wb");
+  if (!iconFile) {
+    stbi_image_free(rgbaPixels);
+    return false;
+  }
+
+  writeU16(iconFile, 0);
+  writeU16(iconFile, 1);
+  writeU16(iconFile, 1);
+
+  fwrite(&iconWidth, 1, 1, iconFile);
+  fwrite(&iconHeight, 1, 1, iconFile);
+  const uint8_t colorCount = 0;
+  const uint8_t reserved = 0;
+  fwrite(&colorCount, 1, 1, iconFile);
+  fwrite(&reserved, 1, 1, iconFile);
+  writeU16(iconFile, 1);
+  writeU16(iconFile, 32);
+  writeU32(iconFile, dibSize);
+  writeU32(iconFile, 6 + 16);
+
+  writeU32(iconFile, 40);
+  writeU32(iconFile, static_cast<uint32_t>(width));
+  writeU32(iconFile, static_cast<uint32_t>(height * 2));
+  writeU16(iconFile, 1);
+  writeU16(iconFile, 32);
+  writeU32(iconFile, 0);
+  writeU32(iconFile, xorSize);
+  writeU32(iconFile, 0);
+  writeU32(iconFile, 0);
+  writeU32(iconFile, 0);
+  writeU32(iconFile, 0);
+
+  for (int y = height - 1; y >= 0; --y) {
+    const stbi_uc* row = rgbaPixels + (static_cast<size_t>(y) * static_cast<size_t>(width) * 4);
+    for (int x = 0; x < width; ++x) {
+      const stbi_uc* pixel = row + (static_cast<size_t>(x) * 4);
+      const uint8_t bgra[4] = {pixel[2], pixel[1], pixel[0], pixel[3]};
+      fwrite(bgra, sizeof(bgra), 1, iconFile);
+    }
+  }
+
+  std::vector<uint8_t> andMask(andSize, 0);
+  for (int y = 0; y < height; ++y) {
+    const stbi_uc* row = rgbaPixels + (static_cast<size_t>(height - 1 - y) * static_cast<size_t>(width) * 4);
+    uint8_t* maskRow = andMask.data() + (static_cast<size_t>(y) * andStride);
+    for (int x = 0; x < width; ++x) {
+      const stbi_uc alpha = row[static_cast<size_t>(x) * 4 + 3];
+      if (alpha == 0) {
+        maskRow[x / 8] |= static_cast<uint8_t>(0x80 >> (x % 8));
+      }
+    }
+  }
+  fwrite(andMask.data(), andMask.size(), 1, iconFile);
+
+  fclose(iconFile);
+  stbi_image_free(rgbaPixels);
+  return true;
+}
 
 nlohmann::json buildTemplateData(const rex::codegen::CodegenContext& ctx,
                                  const std::vector<const rex::codegen::FunctionNode*>& functions,
@@ -180,13 +291,13 @@ bool CodegenWriter::write(bool force) {
   }
 
   // --- Write game icon extracted from XDBF ---
+  // XDBF stores the title icon as PNG. Convert it to a classic BMP-based ICO
+  // because the Windows resource compiler does not accept raw PNG files or
+  // PNG-in-ICO payloads here.
   if (!ctx_.gameIcon().empty()) {
     auto iconPath = outputPath / fmt::format("{}_icon.ico", config().projectName);
-    FILE* iconFile = fopen(iconPath.string().c_str(), "wb");
-    if (iconFile) {
-      fwrite(ctx_.gameIcon().data(), 1, ctx_.gameIcon().size(), iconFile);
-      fclose(iconFile);
-      REXCODEGEN_INFO("Wrote game icon: {} ({} bytes)", iconPath.string(), ctx_.gameIcon().size());
+    if (writeBmpIco(iconPath, ctx_.gameIcon())) {
+      REXCODEGEN_INFO("Wrote game icon: {}", iconPath.string());
     } else {
       REXCODEGEN_WARN("Failed to write game icon: {}", iconPath.string());
     }

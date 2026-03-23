@@ -66,6 +66,7 @@ target_include_directories(rexcodegen
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${REXGLUE_ROOT}/thirdparty/disasm
+        ${REXGLUE_ROOT}/thirdparty/FidelityFX/framework/cauldron/framework/libs/stb
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/builders
         ${CMAKE_CURRENT_BINARY_DIR}/generated/templates
