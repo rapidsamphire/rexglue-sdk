@@ -218,6 +218,7 @@ bool build_fmr(BuilderContext& ctx);
 bool build_fcfid(BuilderContext& ctx);
 bool build_fctid(BuilderContext& ctx);
 bool build_fctidz(BuilderContext& ctx);
+bool build_fctiw(BuilderContext& ctx);
 bool build_fctiwz(BuilderContext& ctx);
 bool build_frsp(BuilderContext& ctx);
 
@@ -334,6 +335,7 @@ bool build_stwu(BuilderContext& ctx);
 bool build_stwux(BuilderContext& ctx);
 bool build_stwx(BuilderContext& ctx);
 bool build_stwbrx(BuilderContext& ctx);
+bool build_stmw(BuilderContext& ctx);
 
 // Atomic store conditional
 bool build_stwcx(BuilderContext& ctx);
@@ -364,6 +366,7 @@ bool build_lvsl(BuilderContext& ctx);
 bool build_lvsr(BuilderContext& ctx);
 
 // Vector stores
+bool build_stvebx(BuilderContext& ctx);
 bool build_stvehx(BuilderContext& ctx);
 bool build_stvewx(BuilderContext& ctx);
 bool build_stvlx(BuilderContext& ctx);
@@ -482,6 +485,7 @@ bool build_vminsh(BuilderContext& ctx);
 bool build_vminsb(BuilderContext& ctx);
 bool build_vminsw(BuilderContext& ctx);
 bool build_vminuh(BuilderContext& ctx);
+bool build_vminuw(BuilderContext& ctx);
 bool build_vmaxub(BuilderContext& ctx);
 bool build_vminub(BuilderContext& ctx);
 

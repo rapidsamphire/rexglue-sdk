@@ -39,8 +39,11 @@ REXCVAR_DEFINE_STRING(swap_post_effect, "none", "GPU", "Swap post effect: none, 
     .allowed({"none", "fxaa", "fxaa_extreme"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                    "Store shaders persistently and load them when loading games to avoid "
+                    "runtime spikes and freezes when playing the game not for the first time.");
+
 namespace {
-constexpr bool kStoreShaders = true;
 
 rex::graphics::CommandProcessor::SwapPostEffect ParseSwapPostEffect(
     const std::string& effect_name) {
@@ -139,9 +142,9 @@ X_STATUS GraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispatcher,
           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
           uint64_t interval_ticks =
               REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
-          if (current_time - last_frame_time >= interval_ticks) {
+          while (current_time - last_frame_time >= interval_ticks) {
             MarkVblank();
-            last_frame_time = current_time;
+            last_frame_time += interval_ticks;
           }
           rex::thread::Sleep(std::chrono::milliseconds(1));
         }
@@ -323,7 +326,7 @@ void GraphicsSystem::InvalidateGpuMemory() {
 
 void GraphicsSystem::InitializeShaderStorage(const std::filesystem::path& cache_root,
                                              uint32_t title_id, bool blocking) {
-  if (!kStoreShaders) {
+  if (!REXCVAR_GET(store_shaders)) {
     return;
   }
   if (blocking) {

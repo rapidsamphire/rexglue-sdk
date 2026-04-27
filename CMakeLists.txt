@@ -3,10 +3,12 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(ReXGlue
-    VERSION 0.7.2
+    VERSION 0.7.0
     LANGUAGES C CXX
     DESCRIPTION "Xbox 360 Recompilation SDK"
 )
+# Floor only: bump MAJOR.MINOR for API changes. Patch is derived from git tags
+# in cmake/rex_version.cmake. See docs/RELEASING.md.
 
 #==========================================================
 # Build Options
@@ -14,22 +16,14 @@ project(ReXGlue
 option(REXGLUE_BUILD_TESTS       "Build PPC instruction and unit tests" OFF)
 option(REXGLUE_ENABLE_SANITIZERS "Enable UndefinedBehaviorSanitizer" OFF)
 option(REXGLUE_ENABLE_FIDELITYFX "Enable optional AMD FidelityFX integration (experimental)" OFF)
-option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" OFF)
-option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" OFF)
-option(REXGLUE_PROFILE_GUEST_FUNCTIONS     "Enable per-function Tracy zones in recompiled guest code (high overhead)" OFF)
-
+option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" ON)
+option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" ON)
 # Propagate profiling defines globally (compiled out in Release)
 if(REXGLUE_ENABLE_TRACY)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
 endif()
 if(REXGLUE_ENABLE_PERF_COUNTERS)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
-endif()
-if(REXGLUE_PROFILE_GUEST_FUNCTIONS)
-    if(NOT REXGLUE_ENABLE_TRACY)
-        message(FATAL_ERROR "REXGLUE_PROFILE_GUEST_FUNCTIONS requires REXGLUE_ENABLE_TRACY=ON")
-    endif()
-    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_PROFILE_GUEST_FUNCTIONS>)
 endif()
 
 # Graphics backend selection
@@ -142,6 +136,29 @@ endif()
 # Build config as compile definition (multi-config generators don't know config at configure time)
 add_compile_definitions(REXGLUE_BUILD_CONFIG="$<CONFIG>")
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_version.cmake)
+rex_resolve_version(REXGLUE_FULL_VERSION
+    FLOOR_MAJOR ${PROJECT_VERSION_MAJOR}
+    FLOOR_MINOR ${PROJECT_VERSION_MINOR})
+
+# Strip the -id trailer (if any) for the numeric-only version.
+string(REGEX REPLACE "-.*$" "" REXGLUE_NUMERIC_VERSION "${REXGLUE_FULL_VERSION}")
+
+# Parse up to 4 numeric components for consumers that want integer access.
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)(\\.([0-9]+))?(\\.([0-9]+))?" _ "${REXGLUE_NUMERIC_VERSION}")
+set(REXGLUE_DERIVED_MAJOR "${CMAKE_MATCH_1}")
+set(REXGLUE_DERIVED_MINOR "${CMAKE_MATCH_2}")
+if(CMAKE_MATCH_4)
+    set(REXGLUE_DERIVED_PATCH "${CMAKE_MATCH_4}")
+else()
+    set(REXGLUE_DERIVED_PATCH "0")
+endif()
+if(CMAKE_MATCH_6)
+    set(REXGLUE_DERIVED_TWEAK "${CMAKE_MATCH_6}")
+else()
+    set(REXGLUE_DERIVED_TWEAK "0")
+endif()
+
 # Generate version header -- must run after REX_PLATFORM is set
 # Timestamp is set at configure time -- intentionally not updated on every rebuild
 string(TIMESTAMP REXGLUE_BUILD_TIMESTAMP "%Y%m%d_%H%M")
@@ -165,6 +182,7 @@ if(REXGLUE_ENABLE_SANITIZERS)
 endif()
 
 if(REXGLUE_BUILD_TESTS)
+    list(APPEND CMAKE_MODULE_PATH "${REXGLUE_ROOT}/cmake")
     list(APPEND CMAKE_MODULE_PATH "${REXGLUE_ROOT}/thirdparty/catch2/extras")
 endif()
 
@@ -199,6 +217,7 @@ endif()
 # Print configuration summary
 message(STATUS "===========================================")
 message(STATUS "ReXGlue Configuration Summary:")
+message(STATUS "  Version: ${REXGLUE_FULL_VERSION}")
 message(STATUS "  Platform: ${REX_PLATFORM}")
 message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  Configurations: ${CMAKE_CONFIGURATION_TYPES}")

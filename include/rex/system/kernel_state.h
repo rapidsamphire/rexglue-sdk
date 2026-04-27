@@ -15,6 +15,7 @@
 #include <functional>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -46,13 +47,14 @@
 //   REXKRNL_IMPORT_RESULT("NtCreateFile", "{:#x}", result);
 //   REXKRNL_IMPORT_FAIL("NtCreateFile", "path='{}' -> {:#x}", path, result);
 
-#define REXKRNL_IMPORT_TRACE(name, fmt, ...) REXKRNL_TRACE("[" name "] " fmt, ##__VA_ARGS__)
+#define REXKRNL_IMPORT_TRACE(name, fmt, ...) REXKRNL_NOISY_TRACE("[" name "] " fmt, ##__VA_ARGS__)
 
-#define REXKRNL_IMPORT_RESULT(name, fmt, ...) REXKRNL_TRACE("[" name "] -> " fmt, ##__VA_ARGS__)
+#define REXKRNL_IMPORT_RESULT(name, fmt, ...) \
+  REXKRNL_NOISY_TRACE("[" name "] -> " fmt, ##__VA_ARGS__)
 
 #define REXKRNL_IMPORT_FAIL(name, fmt, ...) REXKRNL_WARN("[" name "] FAILED: " fmt, ##__VA_ARGS__)
 
-#define REXKRNL_IMPORT_WARN(name, fmt, ...) REXKRNL_DEBUG("[" name "] " fmt, ##__VA_ARGS__)
+#define REXKRNL_IMPORT_WARN(name, fmt, ...) REXKRNL_NOISY_DEBUG("[" name "] " fmt, ##__VA_ARGS__)
 
 //=============================================================================
 // Kernel State Access Macros
@@ -163,6 +165,16 @@ struct TerminateNotification {
   uint32_t priority;
 };
 
+/// Host-side metadata for a fiber managed by rexcrt hooks.
+struct FiberInfo {
+  rex::thread::Fiber* host_fiber;  ///< Host OS fiber handle
+  uint32_t uid;                    ///< Unique identifier
+  uint32_t guest_context_addr;     ///< Guest fiber context buffer address
+  uint32_t guest_stack_base;       ///< Top of guest kernel stack (0 for thread fibers)
+  uint32_t guest_stack_bottom;     ///< Bottom of guest kernel stack (0 for thread fibers)
+  bool is_thread_fiber;            ///< true = ConvertThreadToFiber (don't free guest stack)
+};
+
 class KernelState {
  public:
   explicit KernelState(Runtime* emulator);
@@ -223,6 +235,7 @@ class KernelState {
   object_ref<XModule> GetModule(const std::string_view name, bool user_only = false);
 
   object_ref<XThread> LaunchModule(object_ref<UserModule> module);
+  object_ref<XThread> PrepareModuleLaunch(object_ref<UserModule> module);
   object_ref<UserModule> GetExecutableModule();
   void SetExecutableModule(object_ref<UserModule> module);
   object_ref<UserModule> LoadUserModule(const std::string_view name, bool call_entry = true);
@@ -251,9 +264,12 @@ class KernelState {
   void OnThreadExit(XThread* thread);
   object_ref<XThread> GetThreadByID(uint32_t thread_id);
 
-  rex::thread::Fiber* LookupFiber(uint32_t guest_addr);
-  void RegisterFiber(uint32_t guest_addr, rex::thread::Fiber* fiber);
+  FiberInfo* LookupFiber(uint32_t guest_addr);
+  void RegisterFiber(uint32_t guest_addr, const FiberInfo& info);
   void UnregisterFiber(uint32_t guest_addr);
+
+  /// Returns a fiber name for profiling
+  const char* GetOrCreateFiberName(uint32_t guest_addr, const char* thread_name);
 
   void RegisterNotifyListener(XNotifyListener* listener);
   void UnregisterNotifyListener(XNotifyListener* listener);
@@ -316,7 +332,12 @@ class KernelState {
   bool has_notified_startup_ = false;
 
   // Protected by global_critical_region_.
-  std::unordered_map<uint32_t, rex::thread::Fiber*> fiber_map_;
+  std::unordered_map<uint32_t, FiberInfo> fiber_map_;
+
+  // Fiber name pool for profiling.
+  // Never erased, Tracy references pointers async.
+  std::mutex fiber_name_pool_mutex_;
+  std::unordered_map<uint32_t, std::unique_ptr<char[]>> fiber_name_pool_;
 
   uint32_t process_type_ = X_PROCTYPE_USER;
   object_ref<UserModule> executable_module_;

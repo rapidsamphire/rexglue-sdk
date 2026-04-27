@@ -171,6 +171,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_FCFID, build_fcfid},
       {PPC_INST_FCTID, build_fctid},
       {PPC_INST_FCTIDZ, build_fctidz},
+      {PPC_INST_FCTIW, build_fctiw},
       {PPC_INST_FCTIWZ, build_fctiwz},
       {PPC_INST_FRSP, build_frsp},
       {PPC_INST_FCMPU, build_fcmpu},
@@ -259,6 +260,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_STWUX, build_stwux},
       {PPC_INST_STWX, build_stwx},
       {PPC_INST_STWBRX, build_stwbrx},
+      {PPC_INST_STMW, build_stmw},
       {PPC_INST_STWCX, build_stwcx},
       {PPC_INST_STDCX, build_stdcx},
       {PPC_INST_STD, build_std},
@@ -280,6 +282,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       //=====================================================================
       {PPC_INST_LVX, build_lvx},
       {PPC_INST_LVX128, build_lvx},
+      {PPC_INST_LVXL, build_lvx},
       {PPC_INST_LVXL128, build_lvx},
       {PPC_INST_LVLX, build_lvlx},
       {PPC_INST_LVLX128, build_lvlx},
@@ -295,6 +298,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       //=====================================================================
       // Memory - Vector Stores
       //=====================================================================
+      {PPC_INST_STVEBX, build_stvebx},
       {PPC_INST_STVEHX, build_stvehx},
       {PPC_INST_STVEWX, build_stvewx},
       {PPC_INST_STVEWX128, build_stvewx},
@@ -305,6 +309,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_STVRX128, build_stvrx},
       {PPC_INST_STVX, build_stvx},
       {PPC_INST_STVX128, build_stvx},
+      {PPC_INST_STVXL, build_stvx},
 
       //=====================================================================
       // System
@@ -476,6 +481,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_VMINUH, build_vminuh},
       {PPC_INST_VMAXUB, build_vmaxub},
       {PPC_INST_VMINUB, build_vminub},
+      {PPC_INST_VMINUW, build_vminuw},
 
       //=====================================================================
       // Vector - Average
@@ -652,7 +658,7 @@ bool DispatchInstruction(int id, BuilderContext& ctx) {
   // and fail at runtime rather than skipping the entire function
   REXCODEGEN_WARN("Unimplemented: {} at 0x{:08X}", ctx.insn.opcode->name, ctx.base);
   ctx.println("\t// UNIMPLEMENTED: {}", ctx.insn.opcode->name);
-  ctx.println("\tPPC_UNIMPLEMENTED(0x{:X}, \"{}\");", ctx.base, ctx.insn.opcode->name);
+  ctx.println("\tREX_UNIMPLEMENTED(0x{:X}, \"{}\");", ctx.base, ctx.insn.opcode->name);
   return true;
 }
 

@@ -151,31 +151,51 @@ void KernelState::SetProcessTLSVars(X_KPROCESS* process, uint32_t num_slots, uin
 }
 
 KernelState::~KernelState() {
-  SetExecutableModule(nullptr);
+  // Destroy app_manager while terminated thread stacks are still valid
+  app_manager_.reset();
 
+  // Stop the dispatch thread before touching the object table
   if (dispatch_thread_running_) {
     dispatch_thread_running_ = false;
     dispatch_cond_.notify_all();
     dispatch_thread_->Wait(0, 0, 0, nullptr);
   }
 
-  executable_module_.reset();
+  // Unload all user modules: release guest heap memory and remove handles.
+  for (size_t i = 0; i < user_modules_.size(); i++) {
+    X_STATUS status = user_modules_[i]->Unload();
+    assert_true(XSUCCEEDED(status));
+    object_table_.RemoveHandle(user_modules_[i]->handle());
+  }
   user_modules_.clear();
+  executable_module_.reset();
   kernel_modules_.clear();
 
-  // Delete all objects.
+  // Unregister all notify listeners.
+  notify_listeners_.clear();
+
+  // Safe to reset now: Runtime::Shutdown() has already stopped graphics,
+  // audio, and input before destroying KernelState.
   object_table_.Reset();
 
   // Destroy any host fibers that were not explicitly cleaned up.
-  for (auto& [guest_addr, fiber] : fiber_map_) {
-    if (fiber) {
-      fiber->Destroy();
+  for (auto& [guest_addr, info] : fiber_map_) {
+    if (info.host_fiber) {
+      info.host_fiber->Destroy();
+    }
+    if (!info.is_thread_fiber && info.guest_stack_bottom) {
+      memory_->LookupHeap(0x70000000)->Release(info.guest_stack_bottom);
+    }
+    if (info.guest_context_addr) {
+      memory_->SystemHeapFree(info.guest_context_addr);
     }
   }
   fiber_map_.clear();
 
-  // Shutdown apps.
-  app_manager_.reset();
+  if (kernel_guest_globals_) {
+    memory_->SystemHeapFree(kernel_guest_globals_);
+    kernel_guest_globals_ = 0;
+  }
 
   if (shared_kernel_state_ == this) {
     shared_kernel_state_ = nullptr;
@@ -449,16 +469,16 @@ object_ref<XModule> KernelState::GetModule(const std::string_view name, bool use
   return nullptr;
 }
 
-object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
+object_ref<XThread> KernelState::PrepareModuleLaunch(object_ref<UserModule> module) {
   if (!module->is_executable()) {
     return nullptr;
   }
 
   SetExecutableModule(module);
-  REXSYS_INFO("KernelState: Launching module...");
+  REXSYS_INFO("KernelState: Preparing module launch...");
 
   // Create a thread to run in.
-  // We start suspended so we can run the debugger prep.
+  // We start suspended so the caller can inspect/attach before resume.
   auto thread = object_ref<XThread>(new XThread(
       this, module->stack_size(), 0, module->entry_point(), 0, X_CREATE_SUSPENDED, true, true));
 
@@ -471,14 +491,14 @@ object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
     return nullptr;
   }
 
-  // TODO(tomc): do we need this for rexglue? more of a nice utility than a requirement like in JIT.
-  // emulator()->function_dispatcher()->PreLaunch();
+  return thread;
+}
 
-  // Resume the thread now.
-  // If the debugger has requested a suspend this will just decrement the
-  // suspend count without resuming it until the debugger wants.
-  thread->Resume();
-
+object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
+  auto thread = PrepareModuleLaunch(std::move(module));
+  if (thread) {
+    thread->Resume();
+  }
   return thread;
 }
 
@@ -565,12 +585,12 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
         }
         auto fn = std::move(dispatch_queue_.front());
         dispatch_queue_.pop_front();
-        REXSYS_DEBUG("Dispatch thread processing queued item ({} remaining)",
-                     dispatch_queue_.size());
+        REXSYS_NOISY_DEBUG("Dispatch thread processing queued item ({} remaining)",
+                           dispatch_queue_.size());
         global_lock.unlock();
 
         fn();
-        REXSYS_DEBUG("Dispatch thread completed item");
+        REXSYS_NOISY_DEBUG("Dispatch thread completed item");
       }
       return 0;
     }));
@@ -660,66 +680,33 @@ void KernelState::TerminateTitle() {
   REXSYS_DEBUG("KernelState::TerminateTitle");
   auto global_lock = global_critical_region_.Acquire();
 
-  // Call terminate routines.
-  // TODO(benvanik): these might take arguments.
-  // FIXME: Calling these will send some threads into kernel code and they'll
-  // hold the lock when terminated! Do we need to wait for all threads to exit?
-  /*
-  if (from_guest_thread) {
-    for (auto routine : terminate_notifications_) {
-      auto thread_state = XThread::GetCurrentThread()->thread_state();
-      function_dispatcher()->Execute(thread_state, routine.guest_routine, nullptr, 0);
+  // Suspend all running guest threads so they stop touching shared state.
+  std::vector<XThread*> suspended_threads;
+  for (auto it = threads_by_id_.begin(); it != threads_by_id_.end(); ++it) {
+    if (!XThread::IsInThread(it->second) && it->second->is_guest_thread() &&
+        it->second->is_running()) {
+      it->second->thread()->Suspend();
+      suspended_threads.push_back(it->second);
     }
   }
-  terminate_notifications_.clear();
-  */
 
-  // Kill all guest threads.
+  // Terminate each suspended thread. Must drop the lock since Terminate waits.
+  global_lock.unlock();
+  for (auto* thread : suspended_threads) {
+    thread->Terminate(0);
+  }
+  global_lock.lock();
+
+  // Remove all guest threads from the map.
   for (auto it = threads_by_id_.begin(); it != threads_by_id_.end();) {
     if (!XThread::IsInThread(it->second) && it->second->is_guest_thread()) {
-      auto thread = it->second;
-
-      if (thread->is_running()) {
-        // NOTE(tomc): JIT safe point stepping not available
-        // Just terminate the thread directly
-        thread->thread()->Suspend();
-
-        global_lock.unlock();
-        // NOTE(tomc): function_dispatcher_->StepToGuestSafePoint() is JIT-only
-        thread->Terminate(0);
-        global_lock.lock();
-      }
-
-      // Erase it from the thread list.
       it = threads_by_id_.erase(it);
     } else {
       ++it;
     }
   }
 
-  // Third: Unload all user modules (including the executable).
-  for (size_t i = 0; i < user_modules_.size(); i++) {
-    X_STATUS status = user_modules_[i]->Unload();
-    assert_true(XSUCCEEDED(status));
-
-    object_table_.RemoveHandle(user_modules_[i]->handle());
-  }
-  user_modules_.clear();
-
-  // Release all objects in the object table.
-  object_table_.PurgeAllObjects();
-
-  // Unregister all notify listeners.
-  notify_listeners_.clear();
-
-  // Unset the executable module.
-  executable_module_ = nullptr;
-
-  if (kernel_guest_globals_) {
-    memory_->SystemHeapFree(kernel_guest_globals_);
-    kernel_guest_globals_ = 0;
-  }
-
+  // If called from a guest thread, self-terminate last.
   if (XThread::IsInThread()) {
     threads_by_id_.erase(XThread::GetCurrentThread()->thread_id());
 
@@ -1065,21 +1052,34 @@ bool KernelState::Restore(stream::ByteStream* stream) {
   return true;
 }
 
-rex::thread::Fiber* KernelState::LookupFiber(uint32_t guest_addr) {
+FiberInfo* KernelState::LookupFiber(uint32_t guest_addr) {
   auto lock = global_critical_region_.Acquire();
   auto it = fiber_map_.find(guest_addr);
-  return it != fiber_map_.end() ? it->second : nullptr;
+  return it != fiber_map_.end() ? &it->second : nullptr;
 }
 
-void KernelState::RegisterFiber(uint32_t guest_addr, rex::thread::Fiber* fiber) {
+void KernelState::RegisterFiber(uint32_t guest_addr, const FiberInfo& info) {
   auto lock = global_critical_region_.Acquire();
-  assert_true(fiber_map_.find(guest_addr) == fiber_map_.end());
-  fiber_map_[guest_addr] = fiber;
+  fiber_map_[guest_addr] = info;
 }
 
 void KernelState::UnregisterFiber(uint32_t guest_addr) {
   auto lock = global_critical_region_.Acquire();
   fiber_map_.erase(guest_addr);
+}
+
+const char* KernelState::GetOrCreateFiberName(uint32_t guest_addr, const char* thread_name) {
+  std::lock_guard lock(fiber_name_pool_mutex_);
+  auto it = fiber_name_pool_.find(guest_addr);
+  if (it != fiber_name_pool_.end()) {
+    return it->second.get();
+  }
+  auto name = fmt::format("Fiber {:08X} ({})", guest_addr, thread_name);
+  auto buf = std::make_unique<char[]>(name.size() + 1);
+  std::memcpy(buf.get(), name.c_str(), name.size() + 1);
+  const char* ptr = buf.get();
+  fiber_name_pool_.emplace(guest_addr, std::move(buf));
+  return ptr;
 }
 
 }  // namespace rex::system
